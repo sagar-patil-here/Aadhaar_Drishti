@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-[#0b0c10] text-gray-300 font-sans antialiased;
+    overflow-x: hidden;
+  }
+}
+
+@layer components {
+  .dashboard-card {
+    @apply bg-[#1f2128] border border-gray-800 rounded-lg p-5 transition-all duration-200 hover:border-gray-700 relative overflow-hidden;
+  }
+  
+  .dashboard-card-title {
+    @apply text-gray-400 text-xs font-medium uppercase tracking-wider mb-2;
+  }
+
+  .dashboard-value {
+    @apply text-2xl font-semibold text-white;
+  }
+
+  .btn-primary {
+    @apply bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-md transition-colors flex items-center justify-center;
+  }
+
+  .btn-secondary {
+    @apply bg-gray-700 hover:bg-gray-600 text-white font-medium py-2 px-4 rounded-md transition-colors flex items-center justify-center;
+  }
+}
+
+@layer utilities {
+  .text-glow {
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+  }
+}
+
+/* Custom Scrollbar for "Mission Control" feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0b0c10;
+}
+::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #4b5563;
+}
