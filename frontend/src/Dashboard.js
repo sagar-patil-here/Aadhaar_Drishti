@@ -8,7 +8,11 @@ import {
 import { SVGMap } from "react-svg-map";
 import India from "@svg-maps/india";
 
-const API_BASE_URL = 'http://localhost:8000';
+// Resolved at build time by Create React App. In local dev this is
+// unset and falls back to `http://localhost:8000`. On Vercel set it to
+// the backend service's routePrefix (e.g. `/_/backend`) so requests go
+// through the same domain — no CORS, no mixed content.
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';
 
 const ZONE_LABELS = { 3: 'CRITICAL', 2: 'HIGH', 1: 'MODERATE', 0: 'SAFE' };
 const ZONE_BADGE = {

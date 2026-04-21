@@ -299,9 +299,9 @@ const Landing = ({ onLaunch }) => {
       <footer className="relative z-10 py-8 px-6 md:px-12 border-t border-white/5 flex flex-col md:flex-row items-center justify-between text-xs font-semibold tracking-wider uppercase text-gray-500 max-w-[1400px] mx-auto">
         <div>&copy; 2026 Aadhaar DRISHTI. All rights reserved.</div>
         <div className="flex gap-6 mt-4 md:mt-0">
-          <a href="#" className="hover:text-white transition-colors">Documentation</a>
-          <a href="#" className="hover:text-white transition-colors">System Protocol</a>
-          <a href="#" className="hover:text-white transition-colors">Security</a>
+          <a href="/" className="hover:text-white transition-colors">Documentation</a>
+          <a href="/" className="hover:text-white transition-colors">System Protocol</a>
+          <a href="/" className="hover:text-white transition-colors">Security</a>
         </div>
       </footer>
     </div>
