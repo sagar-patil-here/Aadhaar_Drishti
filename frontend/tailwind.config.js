@@ -3,6 +3,19 @@ module.exports = {
   content: [
     "./src/**/*.{js,jsx,ts,tsx}",
   ],
+  // StatCard in Dashboard.js composes classes at runtime as
+  //   `bg-${color}-500/10 text-${color}-500 bg-${color}-500/20 bg-${color}-500`
+  // Tailwind's JIT scanner cannot see these interpolated tokens, so any
+  // new colour passed to StatCard must be safelisted here for its CSS
+  // to be generated.
+  safelist: [
+    ...["red", "orange", "yellow", "blue", "purple", "green", "teal"].flatMap((c) => [
+      `bg-${c}-500`,
+      `bg-${c}-500/10`,
+      `bg-${c}-500/20`,
+      `text-${c}-500`,
+    ]),
+  ],
   theme: {
     extend: {
       colors: {

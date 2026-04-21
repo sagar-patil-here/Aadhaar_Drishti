@@ -1,13 +1,36 @@
-fastapi
-uvicorn[standard]
-python-multipart
-pydantic
-pydantic-settings
+# ─── Web framework ──────────────────────────────────────────────
+# Pinned to recent, Pydantic-v2-native FastAPI. Older FastAPI (<0.100)
+# still defaulted to Pydantic v1, which is now deprecated.
+fastapi>=0.115,<0.140
+uvicorn[standard]>=0.30,<0.40
+python-multipart>=0.0.9
 
-pandas
-numpy
-scikit-learn
-joblib
+# ─── Data validation ────────────────────────────────────────────
+pydantic>=2.7,<3
+pydantic-settings>=2.3,<3
 
-reportlab
-python-dotenv
+# ─── ML / data ──────────────────────────────────────────────────
+# pandas 2.x is the stable line that loads the existing Isolation
+# Forest pickle. pandas 3.0 changes some internals and can break
+# older .pkl files, so we stay on 2.x until the model is retrained.
+pandas>=2.2,<3
+numpy>=1.26,<3
+scikit-learn>=1.4,<2
+joblib>=1.3,<2
+
+# ─── Reporting ──────────────────────────────────────────────────
+reportlab>=4.1,<5
+
+# ─── Env loader ─────────────────────────────────────────────────
+# pydantic-settings already reads .env; python-dotenv is kept only
+# for stand-alone scripts that might want it.
+python-dotenv>=1.0,<2
+
+# ─── Testing ────────────────────────────────────────────────────
+pytest>=8.0,<9
+
+# ── Local dev ─────────────────────────────────────────────────────
+# cd /Users/sagarpatil/Work/Projects/Web/Aadhaar_DRISHTI/backend
+# python -m venv venv && source venv/bin/activate
+# pip install -r requirements.txt
+# uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload

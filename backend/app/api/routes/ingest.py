@@ -14,15 +14,6 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _cap_rows(df: pd.DataFrame, label: str) -> pd.DataFrame:
-    """Sample down to MAX_ROWS_PER_CSV if the file is too large."""
-    cap = settings.MAX_ROWS_PER_CSV
-    if cap and len(df) > cap:
-        logger.info(f"[{label}] {len(df)} rows → sampling {cap} (random, preserving distribution)")
-        return df.sample(n=cap, random_state=42).reset_index(drop=True)
-    return df
-
-
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest(
     enrol_file: UploadFile = File(...),
@@ -43,17 +34,17 @@ async def ingest(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"CSV parse error: {e}")
 
-    original_sizes = (len(enrol), len(bio), len(demo))
-    enrol = _cap_rows(enrol, "enrol")
-    bio   = _cap_rows(bio,   "bio")
-    demo  = _cap_rows(demo,  "demo")
     logger.info(
-        f"[{batch_id}] Input sizes: enrol={original_sizes[0]}, bio={original_sizes[1]}, "
-        f"demo={original_sizes[2]} → capped to {len(enrol)}, {len(bio)}, {len(demo)}"
+        f"[{batch_id}] Input sizes: enrol={len(enrol)}, bio={len(bio)}, demo={len(demo)}"
     )
 
     try:
-        df, X_scaled = run_pipeline_from_dataframes(enrol, bio, demo)
+        # Row-cap is applied AFTER merge inside the pipeline so that all
+        # three feeds stay aligned on (date, state, district, pincode).
+        df, X_scaled = run_pipeline_from_dataframes(
+            enrol, bio, demo,
+            max_rows=settings.MAX_ROWS_PER_CSV or None,
+        )
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Preprocessing failed: {e}")
 
@@ -63,24 +54,33 @@ async def ingest(
 
     elapsed_ms = round((time.time() - t0) * 1000, 1)
 
-    ghost_count = sum(
-        1 for f in result["red_flags"]
-        if "ghost_scanner" in f.get("modules_triggered", "")
-    )
-    migration_count = sum(
-        1 for f in result["red_flags"]
-        if "migration_radar" in f.get("modules_triggered", "")
-    )
-    laundering_count = sum(
-        1 for f in result["red_flags"]
-        if "laundering_detector" in f.get("modules_triggered", "")
-    )
+    # Every flagged row is placed into exactly ONE "primary" bucket (for
+    # the headline breakdown) based on the highest-priority module that
+    # fired — so ghost + laundering + migration + isolation_forest_only
+    # always sums to flagged_count.
+    #
+    # We also keep a raw "any-module" count per rule so analysts can see
+    # how many records each detector independently caught.
+    ghost_any = sum(1 for f in result["red_flags"] if "ghost_scanner"        in f.get("modules_triggered", ""))
+    laund_any = sum(1 for f in result["red_flags"] if "laundering_detector"  in f.get("modules_triggered", ""))
+    migr_any  = sum(1 for f in result["red_flags"] if "migration_radar"      in f.get("modules_triggered", ""))
+
+    isolation_only   = 0
+    multi_module     = 0
+    for f in result["red_flags"]:
+        mods = [m for m in f.get("modules_triggered", "").split(",") if m and m != "isolation_forest_only"]
+        if len(mods) == 0:
+            isolation_only += 1
+        elif len(mods) >= 2:
+            multi_module += 1
 
     red_flag_items = [RedFlagItem(**f) for f in result["red_flags"]]
 
     logger.info(
         f"[{batch_id}] Processed {result['secure_count'] + result['flagged_count']} rows "
-        f"in {elapsed_ms}ms — {result['flagged_count']} flagged"
+        f"in {elapsed_ms}ms — {result['flagged_count']} flagged "
+        f"(ghost={ghost_any} laund={laund_any} migr={migr_any} "
+        f"isolation_only={isolation_only} multi={multi_module})"
     )
 
     return IngestResponse(
@@ -91,9 +91,11 @@ async def ingest(
             flagged_count=result["flagged_count"],
             secure_count=result["secure_count"],
             module_breakdown=ModuleBreakdown(
-                ghost_scanner=ghost_count,
-                migration_radar=migration_count,
-                laundering_detector=laundering_count,
+                ghost_scanner=ghost_any,
+                migration_radar=migr_any,
+                laundering_detector=laund_any,
+                isolation_forest_only=isolation_only,
+                multi_module=multi_module,
             ),
             processing_time_ms=elapsed_ms,
         ),

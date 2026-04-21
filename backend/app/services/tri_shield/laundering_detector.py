@@ -16,10 +16,16 @@ Output: df with `laundering_flag` (bool) and `bio_demo_ratio_flag` (bool)
 import pandas as pd
 import logging
 from app.core.config import settings
+from app.core.geography import is_low_population_territory
 
 logger = logging.getLogger(__name__)
 
 RATIO_THRESHOLD = settings.LAUNDERING_BIO_DEMO_RATIO_THRESHOLD
+
+# Minimum absolute biometric volume required before a ratio is
+# considered meaningful. 3 bio updates with 0 demo updates produces
+# a huge ratio mathematically, but in practice is just noise.
+MIN_BIO_VOLUME = 10
 
 
 def run(df: pd.DataFrame) -> pd.DataFrame:
@@ -34,16 +40,27 @@ def run(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
 
-    # Adult laundering
-    adult_flag  = df["bio_demo_ratio_17_"]  > RATIO_THRESHOLD
-    # Minor laundering (especially serious — possible child trafficking link)
-    minor_flag  = df["bio_demo_ratio_5_17"] > RATIO_THRESHOLD
+    adult_flag = (df["bio_demo_ratio_17_"]  > RATIO_THRESHOLD) & (df["bio_age_17_"]  >= MIN_BIO_VOLUME)
+    minor_flag = (df["bio_demo_ratio_5_17"] > RATIO_THRESHOLD) & (df["bio_age_5_17"] >= MIN_BIO_VOLUME)
 
-    df["laundering_flag"]       = adult_flag | minor_flag
-    df["laundering_minor_flag"] = minor_flag    # separate — higher severity
+    # Volume gate: the location needs enough throughput for a ratio to
+    # be meaningful. Skips low-traffic pincodes where 5 biometric
+    # updates against zero demographic updates produces a huge but
+    # operationally meaningless ratio.
+    volume_gate = df["total_enrollments"] >= settings.MIN_TOTAL_ENROLLMENTS_TO_FLAG
+
+    # Suppress low-population UTs to avoid the Andaman-style flood.
+    geo_gate = ~df["state"].astype(str).map(is_low_population_territory)
+
+    df["laundering_flag"]       = (adult_flag | minor_flag) & volume_gate & geo_gate
+    df["laundering_minor_flag"] = minor_flag & volume_gate & geo_gate
 
     flagged = df["laundering_flag"].sum()
-    logger.info(f"[Laundering Detector] Flagged {flagged} rows "
-                f"(ratio threshold: {RATIO_THRESHOLD}x). "
-                f"Minor-specific: {minor_flag.sum()}")
+    logger.info(
+        f"[Laundering Detector] Flagged {flagged} rows "
+        f"(ratio>{RATIO_THRESHOLD}x, bio_volume>={MIN_BIO_VOLUME}). "
+        f"Minor-specific: {int(df['laundering_minor_flag'].sum())} "
+        f"(suppressed_volume={int((~volume_gate).sum())} "
+        f"suppressed_geo={int((~geo_gate).sum())})"
+    )
     return df

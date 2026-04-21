@@ -24,12 +24,20 @@ class RedFlagItem(BaseModel):
     severity: str
     migration_zscore: Optional[float] = 0.0
     ghost_child_zscore: Optional[float] = 0.0
+    # Human-readable reason; guarantees every flagged row has an explanation
+    # even when only the Isolation Forest (and no rule) fires.
+    detection_reason: Optional[str] = ""
+    primary_module: Optional[str] = ""
 
 
 class ModuleBreakdown(BaseModel):
     ghost_scanner: int
     migration_radar: int
     laundering_detector: int
+    # Flagged purely by the ML model (no rule module fired).
+    isolation_forest_only: int = 0
+    # Rows that triggered 2+ rule modules simultaneously (double-counted above).
+    multi_module: int = 0
 
 
 class AnalysisSummary(BaseModel):
@@ -60,6 +68,7 @@ class ReportRequest(BaseModel):
     bio_demo_ratio_5_17: Optional[float] = 0.0
     enrollment_velocity: Optional[float] = 0.0
     migration_zscore: Optional[float] = 0.0
+    ghost_child_zscore: Optional[float] = 0.0
     age_0_5: Optional[int] = 0
     age_5_17: Optional[int] = 0
     age_18_greater: Optional[int] = 0
@@ -68,3 +77,5 @@ class ReportRequest(BaseModel):
     demo_age_5_17: Optional[int] = 0
     demo_age_17_: Optional[int] = 0
     total_enrollments: Optional[int] = 0
+    detection_reason: Optional[str] = ""
+    primary_module: Optional[str] = ""

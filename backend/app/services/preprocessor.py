@@ -94,16 +94,19 @@ def merge_feeds(
 # ─────────────────────────────────────────────
 
 def clean(df: pd.DataFrame) -> pd.DataFrame:
-    # Parse date
+    # Work on an independent copy so downstream mutations never trigger
+    # pandas' SettingWithCopyWarning against the caller's DataFrame.
+    df = df.copy()
+
     df["date"] = pd.to_datetime(df["date"], dayfirst=True, errors="coerce")
-    df = df.dropna(subset=["date"])
+    df = df.dropna(subset=["date"]).copy()
 
     # Normalise state / district strings
-    df["state"] = df["state"].str.strip().str.title()
-    df["district"] = df["district"].str.strip().str.title()
+    df["state"]    = df["state"].astype(str).str.strip().str.title()
+    df["district"] = df["district"].astype(str).str.strip().str.title()
 
     # Pincode sanity: 6-digit Indian pincodes
-    df = df[df["pincode"].between(100000, 999999)]
+    df = df[df["pincode"].between(100000, 999999)].copy()
 
     # Drop exact duplicates
     before = len(df)
@@ -265,15 +268,56 @@ def run_pipeline(
 # 8. IN-MEMORY VARIANT (for FastAPI single-upload)
 # ─────────────────────────────────────────────
 
+def _normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normalises column names (strip + lowercase) so the merge works
+    regardless of whether the CSV headers arrive with stray spaces,
+    mixed case, or inconsistent casing between the three feeds.
+    Without this the outer-join on (date, state, district, pincode)
+    silently produces mismatched rows and the results become unstable.
+    """
+    df.columns = df.columns.str.strip().str.lower()
+    return df
+
+
 def run_pipeline_from_dataframes(
     enrol: pd.DataFrame,
     bio: pd.DataFrame,
     demo: pd.DataFrame,
     fit: bool = False,
+    max_rows: int | None = None,
 ) -> Tuple[pd.DataFrame, np.ndarray]:
-    """Same pipeline but accepts DataFrames directly (API upload path)."""
+    """
+    Same pipeline but accepts DataFrames directly (API upload path).
+
+    Deterministic: applies the row-cap AFTER merge + clean so that
+    rolling-window features (migration_radar) are computed on aligned
+    data, and the same inputs always yield identical outputs.
+    """
+    enrol = _normalise_columns(enrol.copy())
+    bio   = _normalise_columns(bio.copy())
+    demo  = _normalise_columns(demo.copy())
+
     df = merge_feeds(enrol, bio, demo)
     df = clean(df)
+
+    # Cap AFTER merge so that we sample aligned rows rather than
+    # three independent random subsets that rarely share join keys.
+    if max_rows and len(df) > max_rows:
+        logger.info(f"Capping merged rows: {len(df)} → {max_rows} (deterministic frac sample per state)")
+        # frac-based sample keeps migration_radar's per-district history
+        # roughly proportional and is deterministic via random_state.
+        frac = max_rows / len(df)
+        df = (
+            df.groupby("state", group_keys=False, sort=False)
+              .sample(frac=frac, random_state=42)
+              .reset_index(drop=True)
+        )
+        # Groupby sampling can overshoot/undershoot the cap by a few rows
+        # because of per-group rounding; trim to exact cap deterministically.
+        if len(df) > max_rows:
+            df = df.iloc[:max_rows].reset_index(drop=True)
+
     df = engineer_features(df)
     df = encode_categoricals(df, fit=fit)
     df, X_scaled = scale(df, fit=fit)

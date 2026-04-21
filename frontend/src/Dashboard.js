@@ -3,6 +3,7 @@ import { useDropzone } from 'react-dropzone';
 import axios from 'axios';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend as RechartsLegend,
 } from 'recharts';
 import { SVGMap } from "react-svg-map";
 import India from "@svg-maps/india";
@@ -124,6 +125,8 @@ const Dashboard = () => {
           infiltration_cases: summary.module_breakdown.migration_radar,
           laundering_cases: summary.module_breakdown.laundering_detector,
           ghost_children_cases: summary.module_breakdown.ghost_scanner,
+          unclassified_cases: summary.module_breakdown.isolation_forest_only || 0,
+          multi_module_cases: summary.module_breakdown.multi_module || 0,
           anomaly_cases: summary.flagged_count,
           total_records: summary.total_records,
           processing_time_ms: summary.processing_time_ms,
@@ -191,6 +194,37 @@ const Dashboard = () => {
       .sort((a, b) => b.threats - a.threats)
       .slice(0, 5);
   }, [analysisResults]);
+
+  // Module-breakdown pie data — shows how the total flagged pool
+  // distributes across the four categories (the "what about the
+  // remaining N?" answer in chart form).
+  const moduleBreakdownData = useMemo(() => {
+    if (!analysisResults) return [];
+    const s = analysisResults.summary;
+    return [
+      { name: 'Ghost Children', value: s.ghost_children_cases, color: '#3b82f6' },
+      { name: 'Laundering',    value: s.laundering_cases,      color: '#eab308' },
+      { name: 'Infiltration',  value: s.infiltration_cases,    color: '#f97316' },
+      { name: 'Unclassified',  value: s.unclassified_cases,    color: '#a855f7' },
+    ].filter(d => d.value > 0);
+  }, [analysisResults]);
+
+  // Severity-distribution pie data — HIGH / MEDIUM / LOW split of all
+  // flagged records.
+  const severityData = useMemo(() => {
+    if (!analysisResults) return [];
+    const buckets = { HIGH: 0, MEDIUM: 0, LOW: 0 };
+    (analysisResults.raw_flags || []).forEach((f) => {
+      if (f.severity && buckets[f.severity] !== undefined) buckets[f.severity] += 1;
+    });
+    const palette = { HIGH: '#ef4444', MEDIUM: '#f97316', LOW: '#22c55e' };
+    return Object.entries(buckets)
+      .filter(([, v]) => v > 0)
+      .map(([k, v]) => ({ name: k, value: v, color: palette[k] }));
+  }, [analysisResults]);
+
+  const renderPieLabel = ({ name, percent }) =>
+    `${name} ${(percent * 100).toFixed(0)}%`;
 
   const mapRiskData = useMemo(() => {
     if (!analysisResults) return {};
@@ -353,7 +387,7 @@ const Dashboard = () => {
 
         <main className="flex-1 overflow-y-auto p-6 custom-scrollbar">
           {/* Row 1: KPI Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-6">
             <StatCard
               title="Total Threats"
               value={analysisResults.summary.total_threats}
@@ -381,6 +415,13 @@ const Dashboard = () => {
               subtext="Ghost Scanner"
               color="blue"
               icon={<svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>}
+            />
+            <StatCard
+              title="Unclassified"
+              value={analysisResults.summary.unclassified_cases}
+              subtext="ML-only anomaly"
+              color="purple"
+              icon={<svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
             />
           </div>
 
@@ -462,6 +503,110 @@ const Dashboard = () => {
                     <Bar dataKey="threats" fill="#ef4444" radius={[0, 4, 4, 0]} barSize={20} />
                   </BarChart>
                 </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+
+          {/* Row 2.5: Pie charts — category mix & severity mix */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div className="dashboard-card flex flex-col">
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="dashboard-card-title">Threat Category Mix</h3>
+                <span className="text-xs text-gray-500">
+                  {moduleBreakdownData.reduce((s, d) => s + d.value, 0)} flagged
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mb-2">
+                How the flagged records split across the four detection categories.
+                <span className="text-purple-400"> Unclassified</span> = flagged by
+                the ML model without any single Tri-Shield rule firing.
+              </p>
+              <div className="flex-1 min-h-[260px]">
+                {moduleBreakdownData.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-sm text-gray-600">
+                    No threats to chart
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={moduleBreakdownData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={90}
+                        paddingAngle={2}
+                        label={renderPieLabel}
+                        labelLine={false}
+                      >
+                        {moduleBreakdownData.map((d, i) => (
+                          <Cell key={i} fill={d.color} stroke="#0b0c10" strokeWidth={2} />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip
+                        contentStyle={{ backgroundColor: '#1f2128', borderColor: '#374151', fontSize: '12px' }}
+                        formatter={(v, n) => [`${v} flag${v === 1 ? '' : 's'}`, n]}
+                      />
+                      <RechartsLegend
+                        verticalAlign="bottom"
+                        iconType="circle"
+                        wrapperStyle={{ fontSize: '11px', color: '#9ca3af' }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </div>
+
+            <div className="dashboard-card flex flex-col">
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="dashboard-card-title">Severity Distribution</h3>
+                <span className="text-xs text-gray-500">
+                  {severityData.reduce((s, d) => s + d.value, 0)} flagged
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mb-2">
+                HIGH = 2+ signals aligned or deeply anomalous ML score.
+                MEDIUM = single signal. LOW = marginal outlier.
+              </p>
+              <div className="flex-1 min-h-[260px]">
+                {severityData.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-sm text-gray-600">
+                    No threats to chart
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={severityData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={90}
+                        paddingAngle={2}
+                        label={renderPieLabel}
+                        labelLine={false}
+                      >
+                        {severityData.map((d, i) => (
+                          <Cell key={i} fill={d.color} stroke="#0b0c10" strokeWidth={2} />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip
+                        contentStyle={{ backgroundColor: '#1f2128', borderColor: '#374151', fontSize: '12px' }}
+                        formatter={(v, n) => [`${v} flag${v === 1 ? '' : 's'}`, n]}
+                      />
+                      <RechartsLegend
+                        verticalAlign="bottom"
+                        iconType="circle"
+                        wrapperStyle={{ fontSize: '11px', color: '#9ca3af' }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
               </div>
             </div>
           </div>
